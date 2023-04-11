@@ -82,7 +82,6 @@ func FindProduct(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
-
 }
 
 func FilterProductsByPrice(productos []Products, priceF float64) []Products {
@@ -94,6 +93,25 @@ func FilterProductsByPrice(productos []Products, priceF float64) []Products {
 		}
 	}
 	return result
+}
+
+func FindByPrice(c *gin.Context) {
+	products, err := LoadProducts("products.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	priceFStr := c.Query("priceF")
+
+	priceF, err := strconv.ParseFloat(priceFStr, 64)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	filtredProducts := FilterProductsByPrice(products, priceF)
+	c.JSON(http.StatusOK, filtredProducts)
 }
 
 func main() {
@@ -118,20 +136,7 @@ func main() {
 	server.GET("/products/:id", FindProduct)
 
 	//Crear una ruta /products/search que nos permita buscar por parámetro los productos cuyo precio sean mayor a un valor priceGt.
-	server.GET("/products/search", func(c *gin.Context) {
-
-		priceFStr := c.Query("priceF")
-
-		priceF, err := strconv.ParseFloat(priceFStr, 64)
-
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		filtredProducts := FilterProductsByPrice(products, 995)
-		c.JSON(http.StatusOK, filtredProducts)
-	})
+	server.GET("/products/search", FindByPrice)
 
 	server.Run(":8080")
 }
