@@ -6,19 +6,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-/*Ejercicio 1 : Iniciando el proyecto
-Debemos crear un repositorio en github.com para poder subir nuestros avances. Este repositorio es el que vamos a utilizar para
-llevar lo que realicemos durante las distintas prácticas de Go Web.
-Primero debemos clonar el repositorio creado, luego iniciar nuestro proyecto de go con con el comando go mod init.
-El siguiente paso será crear un archivo main.go donde deberán cargar en una slice, desde un archivo JSON, los datos de productos.
-Esta slice se debe cargar cada vez que se inicie la API para realizar las distintas consultas.
-*/
-
-type Products struct {
+type Product struct {
 	ID             int     `json:"id"`
 	Name           string  `json:"name"`
 	Quantity       int     `json:"quantity"`
@@ -28,65 +21,55 @@ type Products struct {
 	Price          float64 `json:"price"`
 }
 
-// func generateMap() map[int]Products {
-// 	products, err := LoadProducts("products.json")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	productsMap := make(map[int]Products)
-// 	for _, product := range products {
-// 		productsMap[product.ID] = product
-// 	}
-// 	return productsMap
-// }
+var productsList = []Product{}
 
-// Cargamos los productos desde el archivo JSON en un slice de productos structc
-func LoadProducts(filename string) ([]Products, error) {
-	var products []Products
-	file, err := os.Open(filename)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&products)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return products, nil
+type ProductRecuest struct {
+	Name           string  `json:"name"`
+	Quantity       int     `json:"quantity"`
+	CodeValue      string  `json:"code_value"`
+	IsPublished    bool    `json:"is_published"`
+	ExpirationDate string  `json:"expiration_date"`
+	Price          float64 `json:"price"`
 }
 
-// Busqueda de producto por ID. Utilizamos LoadProducts para cargar los productos desde el archivo JSON.
-func FindProduct(c *gin.Context) {
-	products, err := LoadProducts("products.json")
+// Cargamos los productos desde el archivo JSON en un slice de productos structc
+func LoadProducts(path string, list *[]Product) {
+	file, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	//Pasamos parametro convertiendo a int
-	id, err := strconv.Atoi(c.Param("id"))
+	err = json.Unmarshal([]byte(file), &list)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		log.Fatal(err)
 	}
-	//Recorremos slice de productos y comparamos el id pasado por parametro con el id de cada producto. Diferente logia al map de clave valor del ejemplo
-	for _, p := range products {
-		if p.ID == id {
-			c.JSON(http.StatusOK, p)
-			return
-		}
-	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 }
 
-func FilterProductsByPrice(productos []Products, priceF float64) []Products {
+// Busqueda de producto por ID. Utilizamos LoadProducts para cargar los productos desde el archivo JSON.
+func FindProduct() gin.HandlerFunc {
+	return func(c *gin.Context) {
 
-	var result []Products
+		idParam := c.Param("id")
+		//Pasamos parametro convertiendo a int
+		id, err := strconv.Atoi(idParam)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		//Recorremos slice de productos y comparamos el id pasado por parametro con el id de cada producto. Diferente logia al map de clave valor del ejemplo
+		for _, p := range productsList {
+			if p.ID == id {
+				c.JSON(http.StatusOK, p)
+				return
+			}
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+	}
+}
+
+// Filtramos productos por precio
+func FilterProductsByPrice(productos []Product, priceF float64) []Product {
+
+	var result []Product
 	for _, p := range productos {
 		if p.Price > priceF {
 			result = append(result, p)
@@ -95,30 +78,83 @@ func FilterProductsByPrice(productos []Products, priceF float64) []Products {
 	return result
 }
 
-func FindByPrice(c *gin.Context) {
-	products, err := LoadProducts("products.json")
-	if err != nil {
-		log.Fatal(err)
+// Busqueda de productos por precio
+func FindByPrice() gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		priceFStr := c.Query("priceF")
+
+		priceF, err := strconv.ParseFloat(priceFStr, 64)
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		filtredProducts := FilterProductsByPrice(productsList, priceF)
+		c.JSON(http.StatusOK, filtredProducts)
 	}
+}
 
-	priceFStr := c.Query("priceF")
+func FindProductAfterAdd(c *gin.Context) {
 
-	priceF, err := strconv.ParseFloat(priceFStr, 64)
+}
 
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+func AddProduct() gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		id := len(productsList) + 1
+
+		var newProduct ProductRecuest
+
+		err2 := c.ShouldBindJSON(&newProduct)
+		if err2 != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err2.Error()})
+			return
+		}
+
+		if newProduct.Name == "" || newProduct.CodeValue == "" || newProduct.ExpirationDate == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No puede haber campos vacios"})
+			return
+		}
+
+		//Verificamos que el codigo no exista
+		for _, p := range productsList {
+			if p.CodeValue == newProduct.CodeValue {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "El codigo ya existe"})
+				return
+			}
+		}
+
+		//Verificamos que la fecha sea valida
+		_, err1 := time.Parse("02/01/2006", newProduct.ExpirationDate)
+		if err1 != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "La fecha no es valida"})
+			return
+		}
+
+		//Creamos el producto
+		prod := Product{
+			ID:             id,
+			Name:           newProduct.Name,
+			Quantity:       newProduct.Quantity,
+			CodeValue:      newProduct.CodeValue,
+			IsPublished:    newProduct.IsPublished,
+			ExpirationDate: newProduct.ExpirationDate,
+			Price:          newProduct.Price,
+		}
+
+		//Agregamos el producto al slice
+		productsList = append(productsList, prod)
+
+		c.JSON(http.StatusOK, productsList)
+		//c.JSON(http.StatusOK, prod)
 	}
-
-	filtredProducts := FilterProductsByPrice(products, priceF)
-	c.JSON(http.StatusOK, filtredProducts)
 }
 
 func main() {
-	products, err := LoadProducts("products.json")
-	if err != nil {
-		log.Fatal(err)
-	}
+
+	LoadProducts("products.json", &productsList)
 
 	server := gin.Default()
 
@@ -129,14 +165,40 @@ func main() {
 
 	//Crear una ruta /products que nos devuelva la lista de todos los productos en la slice.
 	server.GET("/products", func(c *gin.Context) {
-		c.JSON(http.StatusOK, products)
+		c.JSON(http.StatusOK, productsList)
 	})
 
 	//Crear una ruta /products/:id que nos devuelva el producto que tenga el id que se pasa por parámetro.
-	server.GET("/products/:id", FindProduct)
+	server.GET("/products/:id", FindProduct())
 
 	//Crear una ruta /products/search que nos permita buscar por parámetro los productos cuyo precio sean mayor a un valor priceGt.
-	server.GET("/products/search", FindByPrice)
+	server.GET("/products/search", FindByPrice())
+
+	//Crear una ruta /products que nos permita agregar un producto a la slice, mediante POST
+	server.POST("/products", AddProduct())
+
+	//Utilizamos metodo de fila 183 para acceder al producto agregado
+	// server.GET("/products/new/:id", func(c *gin.Context) {
+
+	// 	//Pasamos parametro convertiendo a int
+	// 	id, err := strconv.Atoi(c.Param("id"))
+	// 	if err != nil {
+	// 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// 		return
+	// 	}
+	// 	//Recorremos slice de productos y comparamos el id pasado por parametro con el id de cada producto. Diferente logia al map de clave valor del ejemplo
+	// 	for _, p := range products {
+	// 		if p.ID == id {
+	// 			c.JSON(http.StatusOK, p)
+	// 			return
+	// 		}
+	// 	}
+	// 	c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+	// })
+
+	// pr := server.Group("/products")
+	// pr.POST("/", AddProduct())
+	// pr.GET("/:id", FindProduct)
 
 	server.Run(":8080")
 }
